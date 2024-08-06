@@ -1,0 +1,971 @@
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public enum MyScenes
+{
+    InitScene,
+    MainGame
+}
+public class SceneLoader : MonoBehaviour
+{
+    #region Singleton
+    public static SceneLoader Instance { get; private set; }
+    private void Awake()
+    {
+        if (Instance != null)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
+        DontDestroyOnLoad(gameObject);
+    }
+    #endregion
+
+    [SerializeField] private MyScenes startScene = MyScenes.MainGame;
+
+    private void Start()
+    {
+        LoadScene(startScene);
+    }
+    public void LoadScene(MyScenes scene, LoadSceneMode _loadSceneMode = LoadSceneMode.Single)
+    {
+        SceneManager.LoadScene((int)scene, _loadSceneMode);
+    }
+    public void UnloadScene(MyScenes scene)
+    {
+        if (SceneManager.GetSceneByName(scene.ToString()).isLoaded)
+        {
+            SceneManager.UnloadSceneAsync((int)scene);
+        }
+    }
+}
+
+
+using UnityEngine;
+using UnityEngine.Audio;
+
+public enum MyAudios
+{
+
+}
+public enum MyAudioGroups
+{
+    Master,
+    SFX,
+    UI,
+    Background
+}
+public class AudioManager : MonoBehaviour
+{
+    #region Singleton
+    public static AudioManager Instance { get; private set; }
+    private void Awake()
+    {
+        if (Instance != null)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
+        DontDestroyOnLoad(gameObject);
+    }
+    #endregion
+
+    [SerializeField] private AudioSource[] audioSorces;
+    [SerializeField] private AudioMixer audioMixer;
+
+    public void PlayAudio(MyAudios _audio)
+    {
+        audioSorces[(int)_audio].Play();
+    }
+    public void StopAudio(MyAudios _audio)
+    {
+        audioSorces[(int)_audio].Stop();
+    }
+    public void SetVolume(string _name, float _value)
+    {
+        audioMixer.SetFloat(_name, _value);
+        switch (_name)
+        {
+            case "Master":
+                {
+                    GameManager.Instance.saveFile.volumeMaster = _value;
+                    break;
+                }
+            case "Music":
+                {
+                    GameManager.Instance.saveFile.volumeMusic = _value;
+                    break;
+                }
+            case "SFX":
+                {
+                    GameManager.Instance.saveFile.volumeSFX = _value;
+                    break;
+                }
+            case "UI":
+                {
+                    GameManager.Instance.saveFile.volumeUI = _value;
+                    break;
+                }
+        }
+    }
+
+    public AudioSource GetAudio(MyAudios _audio)
+    {
+        return audioSorces[(int)_audio];
+    }
+}
+
+
+using System.IO;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+
+public class GameManager : MonoBehaviour
+{
+    #region Singleton
+    public static GameManager Instance { get; private set; }
+    private void Awake()
+    {
+        if (Instance != null)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
+        DontDestroyOnLoad(gameObject);
+    }
+    #endregion
+
+    public SaveFile saveFile;
+
+    private void Start()
+    {
+        Load();
+        LoadSavedSettings();
+    }
+    private void LoadSavedSettings()
+    {
+        AudioManager.Instance.SetVolume("Master", saveFile.volumeMaster);
+        AudioManager.Instance.SetVolume("Music", saveFile.volumeMusic);
+        AudioManager.Instance.SetVolume("SFX", saveFile.volumeSFX);
+        AudioManager.Instance.SetVolume("UI", saveFile.volumeUI);
+    }
+
+    public void Save()
+    {
+        var filePath = Application.persistentDataPath + "/savefiles.txt";
+        var data = JsonUtility.ToJson(saveFile);
+
+        using (StreamWriter writer = File.CreateText(filePath))
+        {
+            writer.Write(data);
+        }
+    }
+    public void Load()
+    {
+        var filePath = Application.persistentDataPath + "/savefiles.txt";
+
+        using (StreamReader reader = File.OpenText(filePath))
+        {
+            var data = reader.ReadToEnd();
+            JsonUtility.FromJsonOverwrite(data, saveFile);
+        }
+    }
+}
+
+
+using UnityEngine;
+
+[CreateAssetMenu(fileName = "SaveValues", menuName = "tools/saveValues")]
+public class SaveFile : ScriptableObject
+{
+    [SerializeField] public float volumeMaster;
+    [SerializeField] public float volumeMusic;
+    [SerializeField] public float volumeSFX;
+    [SerializeField] public float volumeUI;
+}
+
+
+Das Sind dann so alle grund Klassen jetzt kommen die Klassen für den spieler
+
+using System;
+using UnityEngine;
+
+public class CamController : MonoBehaviour
+{
+
+    [SerializeField] private string wolfTag = "Wolf";
+
+
+    [SerializeField] private float minX;
+    [SerializeField] private float maxX;
+    [SerializeField] private float minZ;
+    [SerializeField] private float maxZ;
+
+    [SerializeField] private float minDistance;
+    [SerializeField] private float maxDistance;
+    [SerializeField] private float speed;
+
+    private Camera cam;
+
+    public static event Action<Vector3> newDogDestination;
+    public static event Action<GameObject> followWolf;
+    private void Start()
+    {
+        cam = GetComponent<Camera>();
+    }
+
+    private void Update()
+    {
+        float distanceMultiplyer = ((transform.position.y / 80) - 0.3f) * 3.33f;
+        if (Input.GetKey(KeyCode.W))
+        {
+            if (CheckPos(transform.position + Vector3.forward * speed * distanceMultiplyer))
+                transform.position += Vector3.forward * speed * distanceMultiplyer;
+        }
+        if (Input.GetKey(KeyCode.A))
+        {
+            if (CheckPos(transform.position + Vector3.left * speed * distanceMultiplyer))
+                transform.position += Vector3.left * speed * distanceMultiplyer;
+        }
+        if (Input.GetKey(KeyCode.S))
+        {
+            if (CheckPos(transform.position + Vector3.back * speed * distanceMultiplyer))
+                transform.position += Vector3.back * speed * distanceMultiplyer;
+        }
+        if (Input.GetKey(KeyCode.D))
+        {
+            if (CheckPos(transform.position + Vector3.right * speed * distanceMultiplyer))
+                transform.position += Vector3.right * speed * distanceMultiplyer;
+        }
+        if (Input.mouseScrollDelta != Vector2.zero)
+        {
+            Vector3 movement = Input.mouseScrollDelta.y * transform.forward;
+            Vector3 newPos = transform.position + movement;
+            if (newPos.y > minDistance && newPos.y < maxDistance && CheckPos(newPos))
+                transform.position = newPos;
+            else
+                transform.position = new Vector3(newPos.x, Mathf.Clamp(newPos.y, minDistance, maxDistance), transform.position.z);
+
+        }
+        if (Input.GetMouseButtonDown(0))
+        {
+            Ray ray = cam.ScreenPointToRay(Input.mousePosition);
+            RaycastHit hit;
+
+            if (Physics.Raycast(ray, out hit))
+            {
+                if (hit.collider.CompareTag(wolfTag))
+                {
+                    followWolf?.Invoke(hit.collider.gameObject);
+                }
+                else
+                {
+                    newDogDestination?.Invoke(hit.point);
+                }
+            }
+
+        }
+    }
+
+    private bool CheckPos(Vector3 newPos)
+    {
+        if (newPos.x > minX && newPos.x < maxX && newPos.z > minZ && newPos.z < maxZ)
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+}
+
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.AI;
+using UnityEngine.XR;
+
+public class DogMovement : MonoBehaviour
+{
+    private Animator anim;
+    private NavMeshAgent agent;
+
+    private bool following;
+    [SerializeField] private float maxFollowDistance;
+    [SerializeField] private float attackRange;
+
+
+    private GameObject targetWolf;
+    void Start()
+    {
+        CamController.newDogDestination += SetDogDestination;
+        CamController.followWolf += FollowWolf;
+        agent = GetComponent<NavMeshAgent>();
+        agent.stoppingDistance = attackRange;
+        anim = GetComponent<Animator>();
+    }
+    private void OnDisable()
+    {
+        CamController.newDogDestination -= SetDogDestination;
+        CamController.followWolf -= FollowWolf;
+    }
+
+    private void Update()
+    {
+        if(following)
+        {
+            if(Vector3.Distance(transform.position, targetWolf.transform.position) > maxFollowDistance)
+            {
+                return;
+            }
+            if(Vector3.Distance(transform.position, targetWolf.transform.position) < attackRange)
+            {
+                Attack();
+            }
+            agent.SetDestination(targetWolf.transform.position);
+        }
+    }
+
+    private void Attack()
+    {
+        following = false;
+    }
+
+    private void SetDogDestination(Vector3 _newDes)
+    {
+        agent.SetDestination(_newDes);
+    }
+    private void FollowWolf(GameObject _targetWolf)
+    {
+        following = true;
+        targetWolf = _targetWolf;
+    }
+}
+
+und jetzt kommen wir zu meiner wetter state machine
+
+using Unity.IO.LowLevel.Unsafe;
+using UnityEngine;
+using UnityEngine.AI;
+using static UnityEditor.Rendering.InspectorCurveEditor;
+
+public class WeatherStateMachine : MonoBehaviour
+{
+    public Clear clearState;
+    public LightRain lightRainState;
+    public MediumRain mediumRainState;
+    public HeavyRain heavyRainState;
+    private WeatherBaseState curState;
+
+    public WeatherSettings weatherSettings;
+
+    [SerializeField] public int timeSwitchMin;
+    [SerializeField] public int timeSwitchMax;
+
+    [HideInInspector] public float lerpTimer;
+    public float lerpDuration;
+
+
+    [SerializeField] public ParticleSystem rainParticalSystem;
+    [HideInInspector] public ParticleSystem.EmissionModule emission;
+
+    [HideInInspector] public TerrainData terrainData;
+    void Start()
+    {
+        emission = rainParticalSystem.emission;
+        terrainData = GetComponent<Terrain>().terrainData;
+    }
+    void OnEnable()
+    {
+        curState = clearState;
+        curState.Enter(this);
+    }
+
+    private void Update()
+    {
+        curState.Do(this);
+        curState.CheckState(this);
+    }
+    public void SwitchState(WeatherBaseState _newState)
+    {
+        curState.Exit(this);
+        curState = _newState;
+        curState.Enter(this);
+    }
+}
+
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+
+[CreateAssetMenu(fileName = "WeatherValues", menuName = "tools/WeatherValues")]
+public class WeatherSettings : ScriptableObject
+{
+    [SerializeField] public int clearEmissionRate = 0;
+    [SerializeField] public int lightRainEmissionRate = 250;
+    [SerializeField] public int mediumRainEmissionRate = 2000;
+    [SerializeField] public int heavyRainEmissionRate = 20000;
+
+
+    [SerializeField] public float clearGrassSpeed = 0.1f;
+    [SerializeField] public float lightRainGrassSpeed = 0.4f;
+    [SerializeField] public float mediumRainGrassSpeed = 0.8f;
+    [SerializeField] public float heavyRainGrassSpeed = 1f;
+
+    [SerializeField] public Color clearGrassColor;
+    [SerializeField] public Color lightRainGrassColor;
+    [SerializeField] public Color mediumRainGrassColor;
+    [SerializeField] public Color heavyRainGrassColor;
+}
+
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public abstract class WeatherBaseState : MonoBehaviour
+{
+    public abstract void Enter(WeatherStateMachine _context);
+    public abstract void Do(WeatherStateMachine _context);
+    public abstract void FixedDo(WeatherStateMachine _context);
+    public abstract void CheckState(WeatherStateMachine _context);
+    public abstract void Exit(WeatherStateMachine _context);
+}
+
+
+using System;
+using UnityEngine;
+
+public class Clear : WeatherBaseState
+{
+    private float timeUntillRain;
+
+    private float timer = 0;
+
+    private bool rainPossible = false;
+
+    private WeatherStateMachine context;
+    public override void Enter(WeatherStateMachine _context)
+    {
+        context = _context;
+
+        timeUntillRain = GetRandomTimeToRain();
+    }
+    private float GetRandomTimeToRain()
+    {
+        float time = 0;
+        System.Random rnd = new System.Random();
+
+        time = rnd.Next(context.timeSwitchMin, context.timeSwitchMax);
+
+        return time;
+    }
+    public override void Do(WeatherStateMachine _context)
+    {
+        if (_context.lerpTimer < _context.lerpDuration)
+        {
+            _context.lerpTimer += Time.deltaTime;
+            float lerpFactor = _context.lerpTimer / _context.lerpDuration;
+
+            _context.emission.rateOverTime = Mathf.Lerp(_context.emission.rateOverTime.constant, _context.weatherSettings.clearEmissionRate, lerpFactor);
+            _context.terrainData.wavingGrassStrength = Mathf.Lerp(_context.terrainData.wavingGrassStrength, _context.weatherSettings.clearGrassSpeed, lerpFactor);
+            _context.terrainData.wavingGrassTint = Color.Lerp(_context.terrainData.wavingGrassTint, _context.weatherSettings.clearGrassColor, lerpFactor);
+        }
+        if (timer < timeUntillRain)
+        {
+            timer += Time.deltaTime;
+            return;
+        }
+        timer = 0;
+        rainPossible = true;
+    }
+    public override void CheckState(WeatherStateMachine _context)
+    {
+        if (rainPossible) 
+        {
+            System.Random rnd = new System.Random();
+            int temp = rnd.Next(2);
+            if(temp == 0)
+            {
+                _context.SwitchState(_context.lightRainState);
+            }
+            else
+            {
+                _context.SwitchState(_context.mediumRainState);
+            }
+        }
+    }
+    public override void FixedDo(WeatherStateMachine _context)
+    {
+
+    }
+    public override void Exit(WeatherStateMachine _context)
+    {
+        timer = 0;
+        timeUntillRain = 0;
+        rainPossible = false;
+
+        _context.lerpTimer = 0;
+    }
+}
+
+
+using UnityEngine;
+
+public class LightRain : WeatherBaseState
+{
+    private float timeUntillSwitch;
+
+    private float timer = 0;
+
+    private bool rainGettingStronger = false;
+    private bool switchReady = false;
+
+    private WeatherStateMachine context;
+    public override void Enter(WeatherStateMachine _context)
+    {
+        context = _context;
+
+        rainGettingStronger = GetRandomTrueOrFalse();
+        timeUntillSwitch = GetRandomTimeToSwitch();
+    }
+    private bool GetRandomTrueOrFalse()
+    {
+        System.Random rnd = new System.Random();
+        int temp = rnd.Next(2);
+        if (temp == 0)
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    private float GetRandomTimeToSwitch()
+    {
+        float time = 0;
+        System.Random rnd = new System.Random();
+
+        time = rnd.Next(context.timeSwitchMin, context.timeSwitchMax);
+
+        return time;
+    }
+    public override void Do(WeatherStateMachine _context)
+    {
+        if (_context.lerpTimer < _context.lerpDuration)
+        {
+            _context.lerpTimer += Time.deltaTime;
+            float lerpFactor = _context.lerpTimer / _context.lerpDuration;
+
+            _context.emission.rateOverTime = Mathf.Lerp(_context.emission.rateOverTime.constant, _context.weatherSettings.lightRainEmissionRate, lerpFactor);
+            _context.terrainData.wavingGrassStrength = Mathf.Lerp(_context.terrainData.wavingGrassStrength, _context.weatherSettings.lightRainGrassSpeed, lerpFactor);
+            _context.terrainData.wavingGrassTint = Color.Lerp(_context.terrainData.wavingGrassTint, _context.weatherSettings.lightRainGrassColor, lerpFactor);
+        }
+
+
+        if (timer < timeUntillSwitch)
+        {
+            timer += Time.deltaTime;
+            return;
+        }
+        timer = 0;
+        switchReady = true;
+    }
+    public override void CheckState(WeatherStateMachine _context)
+    {
+        if (switchReady)
+        {
+            if (rainGettingStronger)
+            {
+                _context.SwitchState(_context.mediumRainState);
+            }
+            else
+            {
+                _context.SwitchState(_context.clearState);
+            }
+        }
+    }
+    public override void FixedDo(WeatherStateMachine _context)
+    {
+
+    }
+    public override void Exit(WeatherStateMachine _context)
+    {
+        timeUntillSwitch = 0;
+
+        timer = 0;
+
+        rainGettingStronger = false;
+        switchReady = false;
+
+        _context.lerpTimer = 0;
+    }
+}
+
+
+using UnityEngine;
+
+public class MediumRain : WeatherBaseState
+{
+    private float timeUntillSwitch;
+
+    private float timer = 0;
+
+    private bool rainGettingStronger = false;
+    private bool switchReady = false;
+
+    private WeatherStateMachine context;
+    public override void Enter(WeatherStateMachine _context)
+    {
+        context = _context;
+
+        rainGettingStronger = GetRandomTrueOrFalse();
+        timeUntillSwitch = GetRandomTimeToSwitch();
+    }
+    private bool GetRandomTrueOrFalse()
+    {
+        System.Random rnd = new System.Random();
+        int temp = rnd.Next(2);
+        if (temp == 0)
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    private float GetRandomTimeToSwitch()
+    {
+        float time = 0;
+        System.Random rnd = new System.Random();
+
+        time = rnd.Next(context.timeSwitchMin, context.timeSwitchMax);
+
+        return time;
+    }
+    public override void Do(WeatherStateMachine _context)
+    {
+        if (_context.lerpTimer < _context.lerpDuration)
+        {
+            _context.lerpTimer += Time.deltaTime;
+            float lerpFactor = _context.lerpTimer / _context.lerpDuration;
+
+            _context.emission.rateOverTime = Mathf.Lerp(_context.emission.rateOverTime.constant, _context.weatherSettings.mediumRainEmissionRate, lerpFactor);
+            _context.terrainData.wavingGrassStrength = Mathf.Lerp(_context.terrainData.wavingGrassStrength, _context.weatherSettings.mediumRainGrassSpeed, lerpFactor);
+            _context.terrainData.wavingGrassTint = Color.Lerp(_context.terrainData.wavingGrassTint, _context.weatherSettings.mediumRainGrassColor, lerpFactor);
+        }
+
+
+        if (timer < timeUntillSwitch)
+        {
+            timer += Time.deltaTime;
+            return;
+        }
+        timer = 0;
+        switchReady = true;
+    }
+    public override void CheckState(WeatherStateMachine _context)
+    {
+        if (switchReady)
+        {
+            if (rainGettingStronger)
+            {
+                _context.SwitchState(_context.heavyRainState);
+            }
+            else
+            {
+                _context.SwitchState(_context.lightRainState);
+            }
+        }
+    }
+    public override void FixedDo(WeatherStateMachine _context)
+    {
+
+    }
+    public override void Exit(WeatherStateMachine _context)
+    {
+        timeUntillSwitch = 0;
+
+        timer = 0;
+
+        rainGettingStronger = false;
+        switchReady = false;
+
+        _context.lerpTimer = 0;
+    }
+}
+
+
+using UnityEngine;
+
+public class HeavyRain : WeatherBaseState
+{
+    private float timeUntillLessRain;
+
+    private float timer = 0;
+
+    private bool rainPossible = false;
+
+    private WeatherStateMachine context;
+    public override void Enter(WeatherStateMachine _context)
+    {
+        context = _context;
+
+        timeUntillLessRain = GetRandomTimeToRainLess();
+    }
+    private float GetRandomTimeToRainLess()
+    {
+        float time = 0;
+        System.Random rnd = new System.Random();
+
+        time = rnd.Next(context.timeSwitchMin, context.timeSwitchMax);
+
+        return time;
+    }
+    public override void Do(WeatherStateMachine _context)
+    {
+        if (_context.lerpTimer < _context.lerpDuration)
+        {
+            _context.lerpTimer += Time.deltaTime;
+            float lerpFactor = _context.lerpTimer / _context.lerpDuration;
+
+            _context.emission.rateOverTime = Mathf.Lerp(_context.emission.rateOverTime.constant, _context.weatherSettings.heavyRainEmissionRate, lerpFactor);
+            _context.terrainData.wavingGrassStrength = Mathf.Lerp(_context.terrainData.wavingGrassStrength, _context.weatherSettings.heavyRainGrassSpeed, lerpFactor);
+            _context.terrainData.wavingGrassTint = Color.Lerp(_context.terrainData.wavingGrassTint, _context.weatherSettings.heavyRainGrassColor, lerpFactor);
+        }
+
+
+        if (timer < timeUntillLessRain)
+        {
+            timer += Time.deltaTime;
+            return;
+        }
+        timer = 0;
+        rainPossible = true;
+    }
+    public override void CheckState(WeatherStateMachine _context)
+    {
+        if (rainPossible)
+        {
+            System.Random rnd = new System.Random();
+            int temp = rnd.Next(100);
+            if (temp < 10)
+            {
+                _context.SwitchState(_context.clearState);
+            }
+            else if (temp > 10 && temp < 30)
+            {
+                _context.SwitchState(_context.lightRainState);
+            }
+            else if (temp > 30)
+            {
+                _context.SwitchState(_context.mediumRainState);
+            }
+        }
+    }
+    public override void FixedDo(WeatherStateMachine _context)
+    {
+
+    }
+    public override void Exit(WeatherStateMachine _context)
+    {
+        timeUntillLessRain = 0;
+
+        timer = 0;
+
+        rainPossible = false;
+
+        _context.lerpTimer = 0;
+    }
+}
+
+jetzt noch der Spawner
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using UnityEngine.AI;
+
+public class PoolSpawner : MonoBehaviour
+{
+
+    [SerializeField] GameObject enemyPrefab;
+
+    [SerializeField] Transform[] spawnPoints;
+
+    [SerializeField] public PoolSpawner referenceOfOtherSpawner;
+
+
+    [SerializeField] float delayedStartTime;
+    [SerializeField] bool SpawndDirect;
+
+    private float timer;
+    [SerializeField] public float spawnRate;
+
+    [SerializeField] int enemyStartAmount;
+    [SerializeField] int enemyRefillAmount;
+    [SerializeField] int maxEnemyAmount = 2;
+
+
+    [SerializeField] public Vector3 cachePosition;
+
+    public List<GameObject> activeEnemyList = new List<GameObject>();
+    private List<GameObject> cacheEnemyList = new List<GameObject>();
+
+    [SerializeField] private float characterHight;
+
+
+    public static event Action LevelFinished;
+
+    private bool wait;
+    void Start()
+    {
+        wait = true;
+        Invoke("LateStart", delayedStartTime);
+    }
+
+    private void LateStart()
+    {
+        InstantiateNewEnemies(enemyStartAmount);
+        if (SpawndDirect)
+        {
+            for (int i = 0; i < enemyStartAmount; i++)
+            {
+                SpawnNewEnemy();
+            }
+        }
+        wait = false;
+    }
+
+    void Update()
+    {
+        if (wait)
+        {
+            return;
+        }
+        if (activeEnemyList.Count < maxEnemyAmount)
+        {
+            timer += Time.deltaTime;
+            if (timer > spawnRate)
+            {
+                timer = 0;
+                SpawnNewEnemy();
+            }
+        }
+    }
+
+    public void SpawnNewEnemy()
+    {
+        if (activeEnemyList.Count < maxEnemyAmount)
+        {
+            GameObject newEnemy;
+            if (cacheEnemyList.Count <= 0)
+            {
+                InstantiateNewEnemies(enemyRefillAmount);
+            }
+            newEnemy = cacheEnemyList.First();
+            Vector3 spawnPosition = GetNewSpawnPosition();
+            if (spawnPosition == Vector3.zero && spawnPosition == cachePosition)
+            {
+                return;
+            }
+
+
+            NavMeshHit hit;
+            bool temp = NavMesh.SamplePosition(spawnPosition, out hit, 10000f, NavMesh.AllAreas);
+            spawnPosition = hit.position;
+            newEnemy.transform.position = spawnPosition;
+
+
+            cacheEnemyList.Remove(newEnemy);
+            newEnemy.SetActive(true);
+            activeEnemyList.Add(newEnemy);
+        }
+    }
+    public void SpawnNewEnemy(Vector3 _spawnPos)
+    {
+        if (activeEnemyList.Count < maxEnemyAmount)
+        {
+            GameObject newEnemy;
+            if (cacheEnemyList.Count <= 0)
+            {
+                InstantiateNewEnemies(enemyRefillAmount);
+            }
+            newEnemy = cacheEnemyList.First();
+            Vector3 spawnPosition = _spawnPos;
+            if (spawnPosition == Vector3.zero && spawnPosition == cachePosition)
+            {
+                return;
+            }
+
+
+            NavMeshHit hit;
+            bool temp = NavMesh.SamplePosition(spawnPosition, out hit, 10000f, NavMesh.AllAreas);
+            spawnPosition = hit.position;
+            spawnPosition.y += characterHight/2;
+            newEnemy.transform.position = spawnPosition;
+
+
+            cacheEnemyList.Remove(newEnemy);
+            newEnemy.SetActive(true);
+            activeEnemyList.Add(newEnemy);
+        }
+    }
+    private void InstantiateNewEnemies(int amount)
+    {
+        for (int i = 0; i < enemyStartAmount; i++)
+        {
+            GameObject newEnemy;
+            NavMeshHit hit;
+            bool temp = NavMesh.SamplePosition(cachePosition, out hit, 10000f, NavMesh.AllAreas);
+            cachePosition = hit.position;
+            newEnemy = Instantiate(enemyPrefab, cachePosition, transform.rotation, transform);
+            newEnemy.SetActive(false);
+
+
+            WolfStateMachine wolfState;
+            SheepStateMachine sheepState;
+
+            if (newEnemy.TryGetComponent<WolfStateMachine>(out wolfState))
+                WolfStateMachine.spawner = this;
+            if (newEnemy.TryGetComponent<SheepStateMachine>(out sheepState))
+                SheepStateMachine.spawner = this;
+
+            cacheEnemyList.Add(newEnemy);
+        }
+    }
+    public void DespawnEnemy(GameObject _enemy)
+    {
+        activeEnemyList.Remove(_enemy);
+
+        _enemy.GetComponent<NavMeshAgent>().enabled = false;
+        _enemy.transform.position = cachePosition;
+        _enemy.SetActive(false);
+        cacheEnemyList.Add(_enemy);
+    }
+
+    private int counter = -1;
+    private Vector3 GetNewSpawnPosition()
+    {
+        if (SpawndDirect)
+        {
+            counter++;
+            return spawnPoints[counter].position;
+        }
+        Vector3 spawnPosition;
+        System.Random rnd = new System.Random();
+
+        spawnPosition = spawnPoints[rnd.Next(spawnPoints.Length)].position;
+        return spawnPosition;
+    }
+}

@@ -1,0 +1,951 @@
+so was jetzt noch fehlt sind die AIs und deren state machines 
+
+jetzt die sheep AI:
+
+using System.Collections.Generic;
+using System.Linq;
+using Unity.VisualScripting.Antlr3.Runtime;
+using UnityEngine;
+using UnityEngine.AI;
+using UnityEngine.UI;
+using static UnityEngine.GraphicsBuffer;
+
+public class SheepStateMachine : MonoBehaviour
+{
+    [HideInInspector] public static PoolSpawner spawner;
+
+    public SheepIdleState sheepIdleState;
+    public SheepRunState sheepRunState;
+    public SheepHungerState sheepHungerState;
+    public SheepEatState sheepEatState;
+    public SheepFindPartnerState sheepFindPartnerState;
+    public SheepBreedState sheepBreedState;
+    private SheepBaseState curState;
+    public SheepBaseState CurState { get { return curState; } }
+
+    [SerializeField] public float walkSpeed;
+    [SerializeField] public const float viewRange = 2f;
+    [Range(0, 360)][SerializeField] public const float viewAngle = 50f;
+
+    [SerializeField] private float maxXValueForDestination = 575;
+    [SerializeField] private float minXValueForDestination = 500;
+    [SerializeField] private float maxZValueForDestination = 565;
+    [SerializeField] private float minZValueForDestination = 515;
+
+    [HideInInspector] public Rigidbody2D rb;
+    [HideInInspector] public SpriteRenderer sr;
+    [HideInInspector] public Animator anim;
+    [HideInInspector] public NavMeshAgent agent;
+
+    void OnEnable()
+    {
+        rb = GetComponent<Rigidbody2D>();
+        sr = GetComponent<SpriteRenderer>();
+        anim = GetComponent<Animator>();
+        agent = GetComponent<NavMeshAgent>();
+
+        agent.speed = walkSpeed;
+
+        curState = sheepIdleState;
+        curState.Enter(this);
+    }
+
+    void Update()
+    {
+        curState.Do(this);
+        curState.CheckState(this);
+    }
+
+    public void SwitchState(SheepBaseState _newState)
+    {
+        curState.Exit(this);
+        curState = _newState;
+        curState.Enter(this);
+    }
+    public void DealDamage()
+    {
+        Die();
+        Debug.Log("Sheep got damage");
+    }
+
+
+    public void NavigateRandomDestination()
+    {
+        if (agent.isOnNavMesh)
+        {
+            agent.SetDestination(GetRandomDestination());
+        }
+    }
+    private Vector3 GetRandomDestination()
+    {
+        Vector3 destination;
+        System.Random rnd = new System.Random();
+
+        float angle = (float)(rnd.NextDouble() * Mathf.PI * 2);
+        destination = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
+
+        destination *= rnd.Next(20);
+
+        Vector3 targetPos = transform.position + destination;
+
+        if (InvalidDestination(targetPos))
+        {
+            return GetRandomDestination();
+        }
+        NavMeshHit hit;
+        if (NavMesh.SamplePosition(targetPos, out hit, 1.0f, NavMesh.AllAreas))
+        {
+            return hit.position;
+        }
+        else
+        {
+            return GetRandomDestination();
+        }
+    }
+    private bool InvalidDestination(Vector3 _destination)
+    {
+        if (_destination.x > maxXValueForDestination)
+            return true;
+        if (_destination.x < minXValueForDestination)
+            return true;
+        if (_destination.z > maxZValueForDestination)
+            return true;
+        if (_destination.z < minZValueForDestination)
+            return true;
+
+        return false;
+    }
+
+    public List<GameObject> CheckFOV(string _tagToSearch, float _viewRange = viewRange, float _viewAngle = viewAngle)
+    {
+        List<GameObject> hits = new List<GameObject>();
+
+        RaycastHit[] rayHits = Physics.SphereCastAll(transform.position, _viewRange, Vector3.zero);
+
+        foreach (RaycastHit hit in rayHits)
+        {
+            if (hit.collider.CompareTag(_tagToSearch))
+            {
+                Vector3 directionToTarget = (hit.transform.position - transform.position).normalized;
+                if (Vector3.Angle(transform.forward, directionToTarget) < _viewAngle / 2)
+                {
+                    hits.Add(hit.collider.gameObject);
+                }
+            }
+        }
+        return hits;
+    }
+    public List<GameObject> CheckFOV(System.Type _componentType, float _viewRange = viewRange, float _viewAngle = viewAngle)
+    {
+        List<GameObject> hits = new List<GameObject>();
+
+        RaycastHit[] rayHits = Physics.SphereCastAll(transform.position, _viewRange, Vector3.zero);
+
+        foreach (RaycastHit hit in rayHits)
+        {
+            if (hit.collider.TryGetComponent(_componentType, out Component temp))
+            {
+                Vector3 directionToTarget = (hit.transform.position - transform.position).normalized;
+                if (Vector3.Angle(transform.forward, directionToTarget) < _viewAngle / 2)
+                {
+                    hits.Add(hit.collider.gameObject);
+                }
+            }
+        }
+        return hits;
+    }
+
+    public GameObject GetNearestFromAll(GameObject[] _listOfAll)
+    {
+        GameObject nearest = _listOfAll.First();
+        foreach(GameObject _object in _listOfAll)
+        {
+            if(Vector3.Distance(transform.position, _object.transform.position) < Vector3.Distance(transform.position, nearest.transform.position))
+                nearest = _object;
+        }
+        return nearest;
+    }
+    public GameObject GetNearestFromAll(List<GameObject> _listOfAll)
+    {
+        GameObject nearest = _listOfAll.First();
+        foreach (GameObject _object in _listOfAll)
+        {
+            if (Vector3.Distance(transform.position, _object.transform.position) < Vector3.Distance(transform.position, nearest.transform.position))
+                nearest = _object;
+        }
+        return nearest;
+    }
+    public static Vector3 GetMiddlePoint(Vector3 _a, Vector3 _b)
+    {
+        return (_a + _b) / 2;
+    }
+
+
+    private void Die()
+    {
+        spawner.DespawnEnemy(this.gameObject);
+        WolfStateMachine.UpdateSheepList();
+    }
+}
+
+using System;
+using System.Threading;
+using UnityEngine;
+
+public abstract class SheepBaseState : MonoBehaviour
+{
+    public abstract void Enter(SheepStateMachine _context);
+    public abstract void Do(SheepStateMachine _context);
+    public abstract void FixedDo(SheepStateMachine _context);
+    public abstract void CheckState(SheepStateMachine _context);
+    public abstract void Exit(SheepStateMachine _context);
+}
+
+
+
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UIElements;
+
+public class SheepHungerState : SheepBaseState
+{
+
+    public override void Enter(SheepStateMachine _context)
+    {
+        
+    }
+    public override void Do(SheepStateMachine _context)
+    {
+    }
+    public override void FixedDo(SheepStateMachine _context)
+    {
+    }
+    public override void CheckState(SheepStateMachine _context)
+    {
+        List<GameObject> visibleWolves = _context.CheckFOV(typeof(WolfStateMachine));
+        if (visibleWolves.Count > 0)
+            _context.SwitchState(_context.sheepRunState);
+    }
+    public override void Exit(SheepStateMachine _context)
+    {
+    }
+
+}
+
+
+using System.Collections.Generic;
+using Unity.Mathematics;
+using UnityEngine;
+
+public class SheepIdleState : SheepBaseState
+{
+
+    private SheepStateMachine context;
+
+
+    private float timer;
+    private float switchDirectionIntervall = 5;
+    [SerializeField] private int switchDirectionIntervallMin = 3;
+    [SerializeField] private int switchDirectionIntervallMax = 7;
+
+
+    private float eatTimer;
+    private float eatTime = 10;
+    [SerializeField] private int eatTimeMin = 8;
+    [SerializeField] private int eatTimeMax = 12;
+    private bool eatingTime = false;
+
+
+    private float breedTimer;
+    private float breedTime = 10;
+    [SerializeField] private int breedTimeMin = 8;
+    [SerializeField] private int breedTimeMax = 12;
+    private bool breedingTime = false;
+    public override void Enter(SheepStateMachine _context)
+    {
+        Debug.Log("Idle");
+        context = _context;
+        System.Random rnd = new System.Random();
+        switchDirectionIntervall = rnd.Next(switchDirectionIntervallMin, switchDirectionIntervallMax);
+        eatTime = rnd.Next(eatTimeMin,eatTimeMax);
+        breedTime = rnd.Next(breedTimeMin,breedTimeMax);
+        _context.NavigateRandomDestination();
+    }
+    public override void Do(SheepStateMachine _context)
+    {
+        timer += Time.deltaTime;
+        if (timer > switchDirectionIntervall)
+        {
+            timer = 0;
+            _context.NavigateRandomDestination();
+        }
+        eatTimer += Time.deltaTime;
+        if (eatTimer > eatTime)
+        {
+            eatTimer = 0;
+            eatingTime = true;
+        }
+        breedTimer += Time.deltaTime;
+        if (breedTimer > breedTime)
+        {
+            breedTimer = 0;
+            breedingTime = true;
+        }
+    }
+    public override void FixedDo(SheepStateMachine _context)
+    {
+    }
+    public override void CheckState(SheepStateMachine _context)
+    {
+        List<GameObject> visibleWolves = _context.CheckFOV(typeof(WolfStateMachine));
+        if(visibleWolves.Count > 0)
+            _context.SwitchState(_context.sheepRunState);
+        //if(eatingTime)
+        //    _context.SwitchState(_context.sheepHungerState);
+        if(breedingTime)
+            _context.SwitchState(_context.sheepFindPartnerState);
+    }
+    public override void Exit(SheepStateMachine _context)
+    {
+        _context.anim.ResetTrigger("Walk");
+        breedingTime = false;
+        eatingTime= false;
+    }
+
+}
+
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.AI;
+
+public class SheepRunState : SheepBaseState
+{
+
+    private Vector3 startDirection;
+    private Vector3 runDestination;
+
+    [SerializeField] private float runDistance;
+    [SerializeField] private float runSpeed;
+
+    public override void Enter(SheepStateMachine _context)
+    {
+        Debug.Log("Run");
+        startDirection = transform.rotation.eulerAngles.normalized;
+        runDestination = new Vector3(-startDirection.x* runDistance, startDirection.y, -startDirection.z* runDistance);
+
+        _context.agent.speed = runSpeed;
+        _context.agent.SetDestination(runDestination);
+    }
+    public override void Do(SheepStateMachine _context)
+    {
+    }
+    public override void FixedDo(SheepStateMachine _context)
+    {
+    }
+    public override void CheckState(SheepStateMachine _context)
+    {
+        if (_context.agent.pathStatus == NavMeshPathStatus.PathComplete)
+            _context.SwitchState(_context.sheepIdleState);
+    }
+    public override void Exit(SheepStateMachine _context)
+    {
+        _context.agent.speed = _context.walkSpeed;
+    }
+}
+
+
+using System.Collections.Generic;
+using UnityEngine;
+
+public class SheepBreedState : SheepBaseState
+{
+    [SerializeField] private float babySpawnDelay;
+    [HideInInspector] public bool lockBabySpawn;
+    [HideInInspector] public bool breedingDone;
+
+    private GameObject partner;
+    public override void Enter(SheepStateMachine _context)
+    {
+        partner = _context.sheepFindPartnerState.partner;
+        Invoke("SpawnBabySheep", babySpawnDelay);
+    }
+    private void SpawnBabySheep()
+    {
+        if (!lockBabySpawn)
+        {
+            partner.GetComponent<SheepBreedState>().lockBabySpawn = true;
+            Vector3 spawnPos = SheepStateMachine.GetMiddlePoint(transform.position, partner.transform.position);
+            SheepStateMachine.spawner.SpawnNewEnemy(spawnPos);
+
+            breedingDone = true;
+            partner.GetComponent<SheepBreedState>().breedingDone = true;
+        }
+    }
+    public override void Do(SheepStateMachine _context)
+    {
+    }
+    public override void FixedDo(SheepStateMachine _context)
+    {
+    }
+    public override void CheckState(SheepStateMachine _context)
+    {
+        if (breedingDone)
+            _context.SwitchState(_context.sheepIdleState);
+    }
+    public override void Exit(SheepStateMachine _context)
+    {
+
+        breedingDone = false;
+        _context.sheepFindPartnerState.partner = null;
+        lockBabySpawn = false;
+    }
+}
+
+
+using UnityEngine;
+using UnityEngine.UIElements;
+
+public class SheepEatState : SheepBaseState
+{
+
+    public override void Enter(SheepStateMachine _context)
+    {
+    
+    }
+    public override void Do(SheepStateMachine _context)
+    {
+    }
+    public override void FixedDo(SheepStateMachine _context)
+    {
+    }
+    public override void CheckState(SheepStateMachine _context)
+    {
+    }
+    public override void Exit(SheepStateMachine _context)
+    {
+    }
+
+}
+
+
+using System.Collections.Generic;
+using Unity.VisualScripting;
+using UnityEngine;
+using UnityEngine.AI;
+
+public class SheepFindPartnerState : SheepBaseState
+{
+    List<GameObject> availablePartners = new List<GameObject>();
+    [HideInInspector] public GameObject partner;
+
+    [SerializeField] private float smellPartnerDistance;
+
+
+    private float timer;
+    [SerializeField] private float switchDirectionIntervall = 3;
+
+    public override void Enter(SheepStateMachine _context)
+    {
+        InvokeRepeating("UpdateAvailablePartners", 0f, 2f);
+    }
+    private void UpdateAvailablePartners()
+    {
+        List<GameObject> allPartners = new List<GameObject>(SheepStateMachine.spawner.activeEnemyList);
+
+        allPartners.Remove(this.gameObject);
+        foreach (GameObject partner in allPartners)
+        {
+            if (partner.GetComponent<SheepStateMachine>().CurState.GetType() == typeof(SheepFindPartnerState))
+            {
+                availablePartners.Add(partner);
+            }
+        }
+    }
+    public override void Do(SheepStateMachine _context)
+    {
+
+        timer += Time.deltaTime;
+        if (timer > switchDirectionIntervall)
+        {
+            timer = 0;
+            _context.NavigateRandomDestination();
+        }
+        if (availablePartners.Count != 0)
+        {
+            float temp = Vector3.Distance(_context.transform.position, _context.GetNearestFromAll(availablePartners).transform.position);
+            if (Vector3.Distance(_context.transform.position,_context.GetNearestFromAll(availablePartners).transform.position) < smellPartnerDistance)
+            {
+                partner = _context.GetNearestFromAll(availablePartners);
+            }
+        }
+        if (partner != null)
+        {
+            _context.agent.SetDestination(SheepStateMachine.GetMiddlePoint(transform.position, partner.transform.position));
+        }
+    }
+    public override void FixedDo(SheepStateMachine _context)
+    {
+    }
+    public override void CheckState(SheepStateMachine _context)
+    {
+        List<GameObject> visibleWolves = _context.CheckFOV(typeof(WolfStateMachine));
+        if (visibleWolves.Count > 0)
+            _context.SwitchState(_context.sheepRunState);
+        if (partner != null && _context.agent.pathStatus == NavMeshPathStatus.PathComplete)
+            _context.SwitchState(_context.sheepBreedState);
+    }
+    public override void Exit(SheepStateMachine _context)
+    {
+        CancelInvoke();
+    }
+}
+
+so jetzt alle wolf Klassen und dann sind wir fertig
+
+using UnityEngine;
+using UnityEngine.AI;
+
+public class WolfStateMachine : MonoBehaviour
+{
+    [HideInInspector] public static GameObject[] sheeps;
+    [HideInInspector] public static PoolSpawner spawner;
+
+    public WolfIdleState idleState;
+    public WolfRunState runState;
+    public WolfWalkState walkState;
+    public WolfStalkState stalkState;
+    public WolfAttackState attackState;
+    private WolfBaseState curState;
+
+    [SerializeField] private float health = 10.0f;
+    [SerializeField] public float walkSpeed;
+    [SerializeField] public float runSpeed;
+    [SerializeField] public float stalkSpeed;
+
+    [HideInInspector] public Rigidbody rb;
+    [HideInInspector] public SpriteRenderer sr;
+    [HideInInspector] public Animator anim;
+    [HideInInspector] public NavMeshAgent agent;
+
+
+
+    [SerializeField] public float wolfSmellDistanceToHuntSheep = 40f;
+    [SerializeField] public float wolfslowDownDistance = 20f;
+    [SerializeField] public float wolfhideDistance = 10f;
+    [SerializeField] public float wolfattackDistance = 2f;
+
+    void OnEnable()
+    {
+        rb = GetComponent<Rigidbody>();
+        sr = GetComponent<SpriteRenderer>();
+        agent = GetComponent<NavMeshAgent>();
+        anim = GetComponent<Animator>();
+
+        agent.Warp(transform.position);
+
+        agent.speed = walkSpeed;
+
+        curState = idleState;
+        curState.Enter(this);
+    }
+
+    private void Start()
+    {
+        UpdateSheepList();
+    }
+
+    public static void UpdateSheepList()
+    {
+        sheeps = spawner.referenceOfOtherSpawner.activeEnemyList.ToArray();
+    }
+
+    void Update()
+    {
+        if (agent.isOnNavMesh)
+        {
+            GetComponent<NavMeshAgent>().enabled = true;
+        }
+        RotateInRightDirection();
+
+        anim.SetFloat("WalkSpeed", agent.velocity.magnitude);
+
+        curState.Do(this);
+        curState.CheckState(this);
+
+        CheckHealth();
+    }
+
+    private void RotateInRightDirection()
+    {
+        if (agent.velocity.magnitude > 0.1f)
+        {
+            Vector3 direction = -agent.velocity.normalized; //Einfach nicht fragen warum minus ich weiß es selbst nicht aber es funktioniert :)
+            Quaternion lookRotation = Quaternion.LookRotation(direction);
+            transform.rotation = lookRotation;
+        }
+    }
+
+    public void SwitchState(WolfBaseState _newState)
+    {
+        curState.Exit(this);
+        curState = _newState;
+        curState.Enter(this);
+    }
+
+    public GameObject GetNearestSheep(Vector3 _pos)
+    {
+        if (sheeps == null || sheeps.Length == 0)
+        {
+            return null;
+        }
+        GameObject nearestSheep = sheeps[0];
+        foreach (GameObject sheep in sheeps)
+        {
+            if (Vector3.Distance(_pos, nearestSheep.transform.position) > Vector3.Distance(_pos, sheep.transform.position))
+            {
+                nearestSheep = sheep;
+            }
+        }
+        return nearestSheep;
+    }
+
+    private void CheckHealth()
+    {
+        if (health <= 0)
+        {
+            Die();
+        }
+    }
+    public void DealDamage(float _damage)
+    {
+        health -= _damage;
+        Debug.Log("Wolf Damage");
+
+    }
+
+    private void Die()
+    {
+        spawner.DespawnEnemy(this.gameObject);
+    }
+}
+
+
+using System;
+using System.Threading;
+using UnityEngine;
+
+public abstract class WolfBaseState : MonoBehaviour
+{
+    public abstract void Enter(WolfStateMachine _context);
+    public abstract void Do(WolfStateMachine _context);
+    public abstract void FixedDo(WolfStateMachine _context);
+    public abstract void CheckState(WolfStateMachine _context);
+    public abstract void Exit(WolfStateMachine _context);
+}
+
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class WolfStalkState : WolfBaseState
+{
+    public override void Enter(WolfStateMachine _context)
+    {
+    }
+    public override void Do(WolfStateMachine _context)
+    {
+        _context.anim.SetTrigger("Stalk");
+        _context.agent.speed = _context.stalkSpeed;
+        GameObject nearestSheep = _context.GetNearestSheep(transform.position);
+        _context.agent.SetDestination(nearestSheep.transform.position);
+    }
+    public override void FixedDo(WolfStateMachine _context)
+    {
+    }
+    public override void CheckState(WolfStateMachine _context)
+    {
+        GameObject nearestSheep = _context.GetNearestSheep(transform.position);
+        Debug.Log(Vector3.Distance(nearestSheep.transform.position, transform.position));
+        if (Vector3.Distance(nearestSheep.transform.position, transform.position) > _context.wolfhideDistance)
+        {
+            _context.SwitchState(_context.walkState);
+        }
+        if (Vector3.Distance(nearestSheep.transform.position, transform.position) < _context.wolfattackDistance)
+        {
+            _context.SwitchState(_context.attackState);
+        }
+    }
+    public override void Exit(WolfStateMachine _context)
+    {
+        _context.anim.ResetTrigger("Stalk");
+    }
+}
+
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class WolfWalkState : WolfBaseState
+{
+    public override void Enter(WolfStateMachine _context)
+    {
+    }
+    public override void Do(WolfStateMachine _context)
+    {
+        _context.anim.SetBool("Walk", true);
+        _context.agent.speed = _context.walkSpeed;
+        GameObject nearestSheep = _context.GetNearestSheep(transform.position);
+        _context.agent.SetDestination(nearestSheep.transform.position);
+    }
+    public override void FixedDo(WolfStateMachine _context)
+    {
+    }
+    public override void CheckState(WolfStateMachine _context)
+    {
+        GameObject nearestSheep = _context.GetNearestSheep(transform.position);
+        if (Vector3.Distance(nearestSheep.transform.position, transform.position) > _context.wolfslowDownDistance)
+        {
+            _context.SwitchState(_context.runState);
+        }
+        if (Vector3.Distance(nearestSheep.transform.position, transform.position) < _context.wolfhideDistance)
+        {
+            _context.SwitchState(_context.stalkState);
+        }
+    }
+    public override void Exit(WolfStateMachine _context)
+    {
+        _context.anim.SetBool("Walk", false);
+    }
+}
+
+
+
+using System.Collections;
+using UnityEngine;
+
+public class WolfAttackState : WolfBaseState
+{
+    private WolfStateMachine context;
+
+    [SerializeField] private float moveSpeed;
+    [SerializeField] private float moveDuration;
+
+    private bool isAttacking;
+    public override void Enter(WolfStateMachine _context)
+    {
+        _context.anim.SetTrigger("Attack");
+        context = _context;
+
+        context.agent.speed = 0.01f;
+
+        isAttacking = true;
+    }
+    public override void Do(WolfStateMachine _context)
+    {
+    }
+    public void StartJumpAttack()
+    {
+    }
+    public void CheckHit()
+    {
+        GameObject target = context.GetNearestSheep(transform.position);
+
+        if(Vector3.Distance(transform.position,target.transform.position) < 3f)
+        {
+            target.GetComponent<SheepStateMachine>().DealDamage();
+        }
+    }
+
+    private void EndJumpAttack()
+    {
+        StartCoroutine(MoveForward());
+        isAttacking = false;
+        context.anim.ResetTrigger("Attack");
+    }
+    private IEnumerator MoveForward()
+    {
+        float elapsedTime = 0f;
+
+        Vector3 startPosition = transform.position;
+        Vector3 targetPosition = startPosition - transform.forward * moveSpeed * moveDuration;
+
+        while (elapsedTime < moveDuration)
+        {
+            transform.position = Vector3.Lerp(startPosition, targetPosition, elapsedTime / moveDuration);
+            elapsedTime += Time.deltaTime;
+            yield return null;
+        }
+
+        transform.position = targetPosition;
+    }
+    public override void FixedDo(WolfStateMachine _context)
+    {
+    }
+    public override void CheckState(WolfStateMachine _context)
+    {
+        if(!isAttacking)
+        {
+            _context.SwitchState(_context.idleState);
+        }
+    }
+    public override void Exit(WolfStateMachine _context)
+    {
+    }
+}
+
+
+
+using UnityEngine;
+using UnityEngine.AI;
+
+public class WolfIdleState : WolfBaseState
+{
+    private WolfStateMachine context;
+
+    [SerializeField] private float maxXValueForDestination = 630;
+    [SerializeField] private float minXValueForDestination = 450;
+    [SerializeField] private float maxZValueForDestination = 630;
+    [SerializeField] private float minZValueForDestination = 480;
+
+
+
+
+    private float timer;
+    private float switchDirectionIntervall = 5;
+    [SerializeField] private int switchDirectionIntervallMin = 3;
+    [SerializeField] private int switchDirectionIntervallMax = 7;
+
+    [SerializeField] private int maxDestinationDistance = 20;
+    public override void Enter(WolfStateMachine _context)
+    {
+        context = _context;
+        context.agent.speed = context.walkSpeed;
+        System.Random rnd = new System.Random();
+        switchDirectionIntervall = rnd.Next(switchDirectionIntervallMin, switchDirectionIntervallMax);
+        NavigateRandomDestination();
+    }
+    private void NavigateRandomDestination()
+    {
+        if (context.agent.isOnNavMesh)
+        {
+            context.agent.SetDestination(GetRandomDestination());
+        }
+    }
+    private Vector3 GetRandomDestination()
+    {
+        Vector3 destination;
+        System.Random rnd = new System.Random();
+
+        float angle = (float)(rnd.NextDouble() * Mathf.PI * 2);
+        destination = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
+
+        destination *= rnd.Next(maxDestinationDistance);
+
+        Vector3 targetPos = transform.position + destination;
+
+        if (InvalidDestination(targetPos))
+        {
+            return GetRandomDestination();
+        }
+        NavMeshHit hit;
+        if (NavMesh.SamplePosition(targetPos, out hit, 1.0f, NavMesh.AllAreas))
+        {
+            return hit.position;
+        }
+        else
+        {
+            return GetRandomDestination();
+        }
+    }
+    private bool InvalidDestination(Vector3 _destination)
+    {
+        if (_destination.x > maxXValueForDestination)
+            return true;
+        if (_destination.x < minXValueForDestination)
+            return true;
+        if (_destination.z > maxZValueForDestination)
+            return true;
+        if (_destination.z < minZValueForDestination)
+            return true;
+
+        return false;
+    }
+    public override void Do(WolfStateMachine _context)
+    {
+        timer += Time.deltaTime;
+        if (timer > switchDirectionIntervall)
+        {
+            timer = 0;
+            NavigateRandomDestination();
+        }
+        if (_context.agent.velocity.magnitude > 0.1f)
+        {
+            _context.anim.SetBool("Walk",true);
+        }
+        else
+        {
+            _context.anim.SetBool("Walk", false);
+        }
+    }
+    public override void FixedDo(WolfStateMachine _context)
+    {
+    }
+    public override void CheckState(WolfStateMachine _context)
+    {
+        GameObject nearestSheep = _context.GetNearestSheep(transform.position);
+        if (Vector3.Distance(nearestSheep.transform.position, transform.position) < _context.wolfSmellDistanceToHuntSheep)
+        {
+            _context.SwitchState(_context.runState);
+        }
+    }
+    public override void Exit(WolfStateMachine _context)
+    {
+        _context.anim.SetBool("Walk", false);
+    }
+
+}
+
+
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class WolfRunState : WolfBaseState
+{
+    public override void Enter(WolfStateMachine _context)
+    {
+    }
+    public override void Do(WolfStateMachine _context)
+    {
+        _context.anim.SetTrigger("Run");
+        _context.agent.speed = _context.runSpeed;
+        GameObject nearestSheep = _context.GetNearestSheep(transform.position);
+        _context.agent.SetDestination(nearestSheep.transform.position);
+    }
+    public override void FixedDo(WolfStateMachine _context)
+    {
+    }
+    public override void CheckState(WolfStateMachine _context)
+    {
+        GameObject nearestSheep = _context.GetNearestSheep(transform.position);
+        if (Vector3.Distance(nearestSheep.transform.position, transform.position) > _context.wolfSmellDistanceToHuntSheep)
+        {
+            _context.SwitchState(_context.idleState);
+        }
+        if (Vector3.Distance(nearestSheep.transform.position, transform.position) < _context.wolfslowDownDistance)
+        {
+            _context.SwitchState(_context.walkState);
+        }
+    }
+    public override void Exit(WolfStateMachine _context)
+    {
+        _context.anim.ResetTrigger("Run");
+    }
+}
+
+so endlich fertig das sind alle relevanten Klassen die auch im uml klassendiagramm wiedergespiegelt werden sollten
